@@ -1,0 +1,24 @@
+{
+  "name": "site-kit",
+  "version": "0.1.0",
+  "description": "Shared plumbing for small static websites on Cloudflare Pages: a Cloudflare Access login and an admin API that saves to GitHub.",
+  "type": "module",
+  "repository": "github:frankspeak/site-kit",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "site-kit-mock-github": "bin/mock-github.mjs"
+  },
+  "files": ["src", "bin"],
+  "scripts": {
+    "check": "tsc -p ."
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261009.1",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
