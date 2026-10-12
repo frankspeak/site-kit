@@ -9,10 +9,48 @@ no site content.
 
 ## How an admin built on it works
 
-1. An administrator opens `/admin` and signs in with a one-time code sent by email (Cloudflare Access).
-2. The site's Pages Functions check that login again themselves on every request (never trusting that Access ran).
-3. A *Save* becomes **one commit** in the site's GitHub repository, limited to the folders the site allows.
-4. The commit makes Cloudflare Pages rebuild the site. Nothing is stored anywhere else: no database.
+An administrator signs in with a one-time code sent by email; each *Save* becomes **one commit** in the site's GitHub
+repository, and the commit makes Cloudflare rebuild the site. Nothing is stored anywhere else: no database.
+
+```mermaid
+flowchart LR
+  B[Admin's browser<br>fills in a form]
+  subgraph Cloudflare
+    A[Access<br>email code login]
+    F[Pages Functions<br>check login and paths]
+    P[Pages build<br>rebuilds all pages]
+  end
+  subgraph GitHub
+    G[Git API<br>creates one commit]
+    M[Branch main<br>the site's files]
+  end
+  B --> A --> F --> G --> M --> P --> S[Live website]
+```
+
+What a save does, step by step:
+
+1. **The browser** prepares everything: the site's admin pages build the file contents (and shrink photos). Each
+   binary file is uploaded on its own first (`POST blob`); GitHub stores it and returns an ID, but it isn't part of
+   the site yet. Then one `POST commit` carries a short summary and the list of changes: a path with new text, a
+   path with an uploaded file's ID, or a path to delete.
+2. **Cloudflare Access** (Zero Trust) sits in front of the admin's path and only lets a request through after the
+   email-code sign-in. It attaches a signed proof of who is signed in.
+3. **Cloudflare Pages Functions** (this package) check that proof again themselves – signature, audience, expiry –
+   never trusting that Access ran, because the same site also answers at addresses Access doesn't cover. A write
+   must come from the admin pages themselves (same origin, JSON). Every path is checked against the folders the
+   site allows (`writable`); one path outside them refuses the whole save.
+4. **GitHub's Git API**, called with `GITHUB_TOKEN`: read the latest commit on the branch, create a new snapshot with
+   the changes applied, create a commit on top, move the branch to it. If someone else committed in between, it
+   tries once more, then reports an error so the administrator can save again.
+5. **The commit** is recorded under the account that owns the token; its message is the summary plus
+   "Saved in the website admin by <email>", so the history shows who saved what. Undoing a save is reverting
+   that commit.
+6. **Cloudflare Pages** is connected to the repository, so a new commit on the branch starts a build – a save in the
+   admin and a `git push` are the same to it. When the build succeeds the site switches to the new version; if it
+   fails, the previous version stays online and the error is in the Pages *Deployments* list.
+
+Functions on the free plan get 10 ms of processing and 50 outgoing requests per request, which is why the browser
+does the preparing and the server only checks and forwards.
 
 ## Using it in a site
 
