@@ -17,8 +17,11 @@ no site content.
 ## Using it in a site
 
 ```bash
-npm install github:frankspeak/site-kit#v0.1.0
+npm install https://github.com/frankspeak/site-kit/archive/refs/tags/v0.1.0.tar.gz
 ```
+
+(The release download, not `github:frankspeak/site-kit#v0.1.0`: npm records that form as an SSH address in the lock
+file, which Cloudflare's build can't fetch.)
 
 One file creates the admin from the site's settings and says which files it may touch:
 
@@ -93,7 +96,7 @@ bin/mock-github.mjs   the stand-in GitHub for local testing
 
 ## Releases
 
-Sites pin a tag (`#v0.1.0`), so a change here reaches a site only when that site moves to a newer tag.
+Sites pin a release (`v0.1.0`), so a change here reaches a site only when that site moves to a newer tag.
 After a change: `npm run check`, test in a site with `npm install ../site-kit`, then tag and push
 (`git tag v0.x.0 && git push --tags`).
 
