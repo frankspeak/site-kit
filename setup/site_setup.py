@@ -7,14 +7,7 @@
 Nothing is changed without --apply. Run it again whenever you like: it only changes what is missing or different.
 Secrets are never read or written: it only reports which ones are missing and how to add them.
 
-What it covers (README, "Setup script"):
-1. Pages project: it exists; for a project Cloudflare builds from GitHub, the build watch paths and which branches
-   get preview builds; R2 bindings; that the secrets the site needs are set.
-2. Address: the custom domain on the project, and the zone file's record pointing it at the project's pages.dev name.
-3. The pages.dev address redirects (301, path kept) to the site's own domain: a Bulk Redirect.
-4. Admin login (sites with an admin): the Access application on <host>/<path>, its policy "Admin" = the admins file,
-   and the application's IDs written into the site's config file.
-5. Email forwarding (optional): Email Routing, an Email Worker that forwards one address to everyone in a file.
+What each step checks and sets: README, "Setup script".
 
 The account comes from the zone file's `account` line; the token and API helper from ~/code/domains/cloudflare-dns.py
 (CLOUDFLARE_API_TOKEN, else asked for, input hidden; its permissions: that folder's README, "Cloudflare API token").
@@ -33,9 +26,10 @@ def write(path, text):
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
 
+
 SETTINGS = "site-setup.json"
 
-# What a type of site needs unless its site-setup.json says otherwise (workspace README, "Site types").
+# What a type of site needs unless its site-setup.json says otherwise (README, "Setup script", site types).
 TYPES = {
     "private-archive": {          # family-tree: static files behind one shared password, built by Cloudflare from GitHub
         "build": "cloudflare-git",
@@ -60,7 +54,9 @@ export default {
   },
 };
 """
-CODE_VERSION = hashlib.sha256(WORKER_CODE.encode()).hexdigest()[:12]   # stored with the Worker, so a code change redeploys
+WORKER_DATE = "2026-10-07"   # compatibility date; the same as the club's Pages Functions
+# Stored with the Worker, so a change of code or date redeploys it.
+CODE_VERSION = hashlib.sha256((WORKER_CODE + WORKER_DATE).encode()).hexdigest()[:12]
 MAIL_RE = re.compile(r"# >>> mail \(written by [^)\n]*\)\n.*?# <<< mail", re.S)
 MAIL_START, MAIL_END = "# >>> mail (written by site-kit/setup/site_setup.py)", "# <<< mail"
 
@@ -176,7 +172,7 @@ class Run:
     """Prints each check as OK / TODO (preview) / DO (with --apply) and collects what's left."""
 
     def __init__(self, apply):
-        self.apply, self.todo, self.failed, self.notes, self.done, self.manual = apply, [], [], [], 0, []
+        self.apply, self.todo, self.failed, self.notes, self.done, self.manual, self.waiting = apply, [], [], [], 0, [], []
 
     def step(self, done, text, action=None):
         print(f"  {'OK  ' if done else ('DO  ' if self.apply and action else 'TODO')} {text}")
@@ -195,7 +191,16 @@ class Run:
 
     def note(self, text):
         print(f"  NOTE {text}")
-        self.notes.append(text)
+        self.next(text)
+
+    def next(self, text):
+        """Something to do after the run (listed once, however many steps ask for it)."""
+        if text not in self.notes:
+            self.notes.append(text)
+
+    def wait(self, text):
+        print(f"  WAIT {text}")
+        self.waiting.append(text)
 
 
 def check_project(cf, s, run):
@@ -262,8 +267,12 @@ def check_address(cf, s, project, run):
 
     def write():
         write_cname_target(s["zone_file"], zone, label, target)
-        run.notes.append(f"{rel} changed: ~/code/domains/cloudflare-dns.py --file {s['zone_file']} (then --apply), and commit it")
+        run.next(zone_changed(s))
     run.step(now == target, f"{rel} points {label or '@'}.{zone} at {target}" + ("" if now in (None, target) else f" (now {now})"), write)
+
+
+def zone_changed(s):
+    return f"{os.path.relpath(s['zone_file'], s['root'])} changed: ~/code/domains/cloudflare-dns.py --file {s['zone_file']} (then --apply), and commit it"
 
 
 def bulk_redirect(cf, list_name, item, run):
@@ -332,6 +341,7 @@ def check_access(cf, s, run):
     rel_cfg = os.path.relpath(a["config_file"], s["root"])
     aud = config_value(a["config_file"], "accessAud")
     apps = cf.all(f"{acct}/access/apps")
+    team = (cf.call("GET", f"{acct}/access/organizations")["result"] or {}).get("auth_domain")
     app = next((x for x in apps if x.get("aud") == aud), None) or next((x for x in apps if x.get("name") == a["name"]), None)
 
     def create():
@@ -347,25 +357,23 @@ def check_access(cf, s, run):
             "allowed_idps": otp, "auto_redirect_to_identity": True, "app_launcher_visible": False,
             "policies": [{"id": pol["id"], "precedence": 1}]})["result"]
         write_config_value(a["config_file"], "accessAud", new["aud"])
-        team = (cf.call("GET", f"{acct}/access/organizations")["result"] or {}).get("auth_domain")
         if team:
             write_config_value(a["config_file"], "accessTeamDomain", team)
-        run.notes.append(f"{rel_cfg} has the new application's AUD: commit and push it, or the admin refuses every sign-in")
+        run.next(f"{rel_cfg} has the new application's AUD: commit and push it, or the admin refuses every sign-in")
     if not app:
         run.step(False, f"Access application “{a['name']}” on {target}, policy “{a['policy']}” = {os.path.basename(a['admins_file'])}", create)
         return
 
     def set_aud():
         write_config_value(a["config_file"], "accessAud", app["aud"])
-        run.notes.append(f"{rel_cfg} changed (accessAud): commit and push it")
+        run.next(f"{rel_cfg} changed (accessAud): commit and push it")
     run.step(app.get("aud") == aud, f"{rel_cfg} has the AUD of “{app.get('name')}”", set_aud)
 
-    team = (cf.call("GET", f"{acct}/access/organizations")["result"] or {}).get("auth_domain")
     have_team = config_value(a["config_file"], "accessTeamDomain")
 
     def set_team():
         write_config_value(a["config_file"], "accessTeamDomain", team)
-        run.notes.append(f"{rel_cfg} changed (accessTeamDomain): commit and push it")
+        run.next(f"{rel_cfg} changed (accessTeamDomain): commit and push it")
     run.step(have_team == team, f"{rel_cfg} has the Zero Trust team domain {team}", set_team)
 
     covered = [d.get("uri") for d in app.get("destinations", [])] or app.get("self_hosted_domains", [])
@@ -398,7 +406,7 @@ def check_access(cf, s, run):
 
 def upload_worker(cf, worker, to):
     """PUT the Worker as an ES module with FORWARD_TO as a plain-text binding (multipart, so not cf.call)."""
-    meta = {"main_module": "worker.js", "compatibility_date": "2026-10-01",
+    meta = {"main_module": "worker.js", "compatibility_date": WORKER_DATE,
             "bindings": [{"type": "plain_text", "name": "FORWARD_TO", "text": ",".join(to)},
                          {"type": "plain_text", "name": "CODE_VERSION", "text": CODE_VERSION}]}
     b = uuid.uuid4().hex
@@ -442,7 +450,7 @@ def check_email(cf, s, run):
 
     def write():
         write_mail_records(s["zone_file"], lines)
-        run.notes.append(f"{rel} changed: ~/code/domains/cloudflare-dns.py --file {s['zone_file']} (then --apply), and commit it")
+        run.next(zone_changed(s))
     run.step(keys <= zone_keys(s["zone_file"], zone_name), f"{rel} lists the mail records Email Routing needs", write)
 
     routing = cf.call("GET", f"/zones/{zone['id']}/email/routing")["result"]
@@ -464,7 +472,7 @@ def check_email(cf, s, run):
         elif known[addr].get("verified"):
             run.step(True, f"{addr}: confirmed")
         else:
-            print(f"  WAIT {addr}: waiting for its owner to click the link in Cloudflare’s email")
+            run.wait(f"{addr}: waiting for its owner to click the link in Cloudflare’s email")
 
     def bindings():
         res = cf.call("GET", f"{acct}/workers/scripts/{e['worker']}/settings", missing_ok=True)
@@ -522,7 +530,9 @@ def run_all(cf, s, apply):
         print(f"{len(run.todo)} change(s) to make: run again with --apply.")
     if run.manual:
         print(f"{len(run.manual)} thing(s) only you can do (the script can't): see TODO above.")
-    if not (run.done or run.failed or run.todo or run.manual):
+    if run.waiting:
+        print(f"{len(run.waiting)} address(es) not confirmed yet: see WAIT above.")
+    if not (run.done or run.failed or run.todo or run.manual or run.waiting):
         print("Everything is set up.")
     return run
 
@@ -533,7 +543,6 @@ def main():
     ap.add_argument("settings", nargs="?", default=SETTINGS, help=f"the site's settings (default: ./{SETTINGS})")
     args = ap.parse_args()
     s = load_settings(args.settings)
-    sys.path.insert(0, DOMAINS)
     run_all(load_cloudflare(s["zone_file"]), s, args.apply)
 
 

@@ -18,13 +18,14 @@ flowchart LR
   subgraph Cloudflare
     A[Access<br>email code login]
     F[Pages Functions<br>check login and paths]
-    P[Pages build<br>rebuilds all pages]
+    P[Pages<br>serves the new version]
   end
   subgraph GitHub
     G[Git API<br>creates one commit]
     M[Branch main<br>the site's files]
+    W[Build<br>Actions, or Cloudflare's]
   end
-  B --> A --> F --> G --> M --> P --> S[Live website]
+  B --> A --> F --> G --> M --> W --> P --> S[Live website]
 ```
 
 What a save does, step by step:
@@ -45,9 +46,10 @@ What a save does, step by step:
 5. **The commit** is recorded under the account that owns the token; its message is the summary plus
    "Saved in the website admin by <email>", so the history shows who saved what. Undoing a save is reverting
    that commit.
-6. **Cloudflare Pages** is connected to the repository, so a new commit on the branch starts a build – a save in the
-   admin and a `git push` are the same to it. When the build succeeds the site switches to the new version; if it
-   fails, the previous version stays online and the error is in the Pages *Deployments* list.
+6. **The build:** a new commit on the branch starts the site's build – by a GitHub Actions workflow that uploads to
+   Pages (bavarianspringboks), or by Cloudflare itself for a project connected to the repository. A save in the admin
+   and a `git push` are the same to it. When the build succeeds the site switches to the new version; if it fails,
+   the previous version stays online and the error is in the workflow's run or the Pages *Deployments* list.
 
 Functions on the free plan get 10 ms of processing and 50 outgoing requests per request, which is why the browser
 does the preparing and the server only checks and forwards.
@@ -68,7 +70,7 @@ One file creates the admin from the site's settings and says which files it may 
 import { createAdmin } from 'site-kit';
 
 export const admin = createAdmin({
-  host: 'example.pages.dev',                            // the address behind Cloudflare Access
+  host: 'www.example.com',                              // the address behind Cloudflare Access
   accessTeamDomain: 'your-team.cloudflareaccess.com',   // Zero Trust → Settings
   accessAud: '…',                                       // the Access application's "audience" tag (not secret)
   githubRepo: 'owner/repo',
@@ -124,11 +126,13 @@ The working copy is never changed; every "commit" is listed in `.mock-github/com
 ## Layout
 
 ```
-src/auth.ts        checks the Cloudflare Access login (signature, audience, expiry); the settings type
-setup/site_setup.py   the setup script (Python, not in the npm package); setup/test_site_setup.py its tests
-src/github.ts      GitHub client: file list, file contents, upload, one commit with several changes
-src/admin.ts       createAdmin(): the guards and the five API handlers
-bin/mock-github.mjs   the stand-in GitHub for local testing
+src/index.ts             what the package exports
+src/auth.ts              checks the Cloudflare Access login (signature, audience, expiry); the settings type
+src/github.ts            GitHub client: file list, file contents, upload, one commit with several changes
+src/admin.ts             createAdmin(): the guards and the five API handlers
+bin/mock-github.mjs      the stand-in GitHub for local testing
+setup/site_setup.py      the setup script (Python, not in the npm package)
+setup/test_site_setup.py its tests
 ```
 
 `npm run check` type-checks it. The code is TypeScript used as-is (Cloudflare bundles it); there is no build step.
@@ -155,7 +159,8 @@ python3 ~/code/site-kit/setup/site_setup.py --apply    # makes the changes
 
 It never reads or writes a secret's value; it lists the missing ones with the dashboard path to add them. It uses the
 Cloudflare API helper and token of the private `~/code/domains` repository (its README, "Cloudflare API token"), and
-the account named on the zone file's `account` line. Not part of the npm package.
+the account named on the zone file's `account` line, so it (and its tests) only run where that repository is checked
+out. Not part of the npm package.
 
 | Step | What it checks, and sets with `--apply` | API docs |
 |---|---|---|
@@ -180,6 +185,6 @@ Tests (no network): `python3 -m unittest discover -s setup`.
 
 1. **Access rules per path** – one middleware with three modes (`public`, shared `password`, `access`), so a
    whole-site login like family-tree's uses the same code. When the family edits.
-2. **GitHub App instead of a personal token** – nothing expires. When the club's repository moves to a club
-   organisation.
+2. **GitHub App instead of a personal token** – saves no longer depend on one person's GitHub account. When the
+   club's repository moves to a club organisation.
 3. Shared GitHub workflows (daily rebuild, photo conversion).

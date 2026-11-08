@@ -249,6 +249,14 @@ class SiteSetupTests(unittest.TestCase):
         self.assertIn("accessTeamDomain: 'club.cloudflareaccess.com'", cfg)
         self.assertIn("refuses every sign-in", out)
 
+    def test_unconfirmed_address_is_not_set_up(self):
+        s, state = self.club([])
+        state["destinations"] = [{"email": "a@x.de", "verified": False}]
+        run, out = quiet(S.run_all, FakeCloudflare(state), s, False)
+        self.assertIn("WAIT a@x.de", out)
+        self.assertIn("1 address(es) not confirmed yet", out)
+        self.assertNotIn("Everything is set up", out)
+
     def test_missing_project_says_how(self):
         s, state = self.club([])
         state["projects"] = {}
