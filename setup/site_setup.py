@@ -176,7 +176,7 @@ class Run:
     """Prints each check as OK / TODO (preview) / DO (with --apply) and collects what's left."""
 
     def __init__(self, apply):
-        self.apply, self.todo, self.failed, self.notes = apply, [], [], []
+        self.apply, self.todo, self.failed, self.notes, self.done, self.manual = apply, [], [], [], 0, []
 
     def step(self, done, text, action=None):
         print(f"  {'OK  ' if done else ('DO  ' if self.apply and action else 'TODO')} {text}")
@@ -185,12 +185,13 @@ class Run:
         if self.apply and action:
             try:
                 action()
+                self.done += 1
                 return
             except (RuntimeError, SystemExit) as e:   # an API error exits; the other steps report their own state
                 print(f"       FAILED: {e}")
                 self.failed.append(text)
                 return
-        self.todo.append(text)
+        (self.todo if action else self.manual).append(text)
 
     def note(self, text):
         print(f"  NOTE {text}")
@@ -305,8 +306,8 @@ def bulk_redirect(cf, list_name, item, run):
     others = [r.get("description") or r.get("expression") for r in rules if list_name not in r.get("expression", "")]
     if others:
         print(f"       (other redirect rules in this account, kept: {', '.join(others)})")
-    sub = "and its subdomains " if item["include_subdomains"] else "(not its subdomains) "
-    run.step(bool(lst) and same and on, f"{item['source_url'].rstrip('/')} {sub}redirects to {item['target_url']}", apply)
+    sub = "and its subdomains redirect" if item["include_subdomains"] else "(not its subdomains) redirects"
+    run.step(bool(lst) and same and on, f"{item['source_url'].rstrip('/')} {sub} to {item['target_url']}", apply)
 
 
 def check_redirect(cf, s, project, run):
@@ -513,14 +514,16 @@ def run_all(cf, s, apply):
     print()
     for n in run.notes:
         print(f"Next: {n}")
+    if run.done:
+        print(f"Done: {run.done} change(s) made. Run it again without --apply to see everything OK.")
     if run.failed:
         print(f"{len(run.failed)} step(s) failed (see above); fix that and run again with --apply.")
-    elif run.todo and not apply:
+    if run.todo:
         print(f"{len(run.todo)} change(s) to make: run again with --apply.")
-    elif run.todo:
-        print(f"{len(run.todo)} thing(s) only you can do: see TODO above.")
-    else:
-        print("Everything is set up." if not apply or not run.notes else "Done.")
+    if run.manual:
+        print(f"{len(run.manual)} thing(s) only you can do (the script can't): see TODO above.")
+    if not (run.done or run.failed or run.todo or run.manual):
+        print("Everything is set up.")
     return run
 
 

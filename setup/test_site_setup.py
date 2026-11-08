@@ -187,11 +187,13 @@ class SiteSetupTests(unittest.TestCase):
         self.assertFalse(state["items"][0]["include_subdomains"])
         self.assertEqual([r.get("description") for r in state["rules"]][0], "someone else's")
         self.assertIn("$tree_pages_dev", state["rules"][1]["expression"])
+        self.assertIn("tree-cdu.pages.dev (not its subdomains) redirects to", out)
+        self.assertIn("Done: 4 change(s) made.", out)
         # A second run finds nothing left to change but the secret.
         cf2 = FakeCloudflare(state)
         run2, out2 = quiet(S.run_all, cf2, s, True)
         self.assertEqual(cf2.writes, [])
-        self.assertEqual(run2.todo, ["secret SITE_PASSWORD is set (preview): Workers & Pages → tree → Settings → "
+        self.assertEqual(run2.manual, ["secret SITE_PASSWORD is set (preview): Workers & Pages → tree → Settings → "
                                      "Variables and secrets → Preview → Add, type Secret"])
 
     # ── a public site with an admin (the club's type) ─────────────────────────
