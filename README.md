@@ -10,7 +10,7 @@ no site content.
 ## How an admin built on it works
 
 An administrator signs in with a one-time code sent by email; each *Save* becomes **one commit** in the site's GitHub
-repository, and the commit makes Cloudflare rebuild the site. Nothing is stored anywhere else: no database.
+repository, and the commit starts the site's build (by Cloudflare or GitHub Actions). Nothing is stored anywhere else: no database.
 
 ```mermaid
 flowchart LR
@@ -125,6 +125,7 @@ The working copy is never changed; every "commit" is listed in `.mock-github/com
 
 ```
 src/auth.ts        checks the Cloudflare Access login (signature, audience, expiry); the settings type
+setup/site_setup.py   the setup script (Python, not in the npm package); setup/test_site_setup.py its tests
 src/github.ts      GitHub client: file list, file contents, upload, one commit with several changes
 src/admin.ts       createAdmin(): the guards and the five API handlers
 bin/mock-github.mjs   the stand-in GitHub for local testing
@@ -141,12 +142,44 @@ After a change: `npm run check`, test in a site with `npm install ../site-kit`, 
 ## Sites using it
 
 - `bavarianspringboks` – club website with an admin for events, photos and newsletters.
+- `family-tree` – the setup script only (a private archive; no admin).
+
+## Setup script
+
+`setup/site_setup.py` makes a site's Cloudflare setup match the `site-setup.json` in its folder. Run it there:
+
+```bash
+python3 ~/code/site-kit/setup/site_setup.py            # shows what is set up and what would change
+python3 ~/code/site-kit/setup/site_setup.py --apply    # makes the changes
+```
+
+It never reads or writes a secret's value; it lists the missing ones with the dashboard path to add them. It uses the
+Cloudflare API helper and token of the private `~/code/domains` repository (its README, "Cloudflare API token"), and
+the account named on the zone file's `account` line. Not part of the npm package.
+
+| Step | What it checks, and sets with `--apply` | API docs |
+|---|---|---|
+| 1. Pages project | exists; for a project Cloudflare builds from GitHub: build watch paths, preview branches; R2 bindings; secrets set (names only) | [Pages projects](https://developers.cloudflare.com/api/resources/pages/subresources/projects/methods/edit/), [build watch paths](https://developers.cloudflare.com/pages/configuration/build-watch-paths/), [branch controls](https://developers.cloudflare.com/pages/configuration/branch-build-controls/) |
+| 2. Address | the custom domain; the zone file's CNAME pointing at the project's pages.dev name | [Custom domains](https://developers.cloudflare.com/pages/configuration/custom-domains/) |
+| 3. pages.dev address | a Bulk Redirect (301, path kept) to the site's domain; with or without subdomains | [Bulk Redirects](https://developers.cloudflare.com/rules/url-forwarding/bulk-redirects/) |
+| 4. Admin login | the Access application on `<host>/<path>`, policy "Admin" = the admins file, its AUD and team domain written into the site's config | [Self-hosted applications](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-public-app/), [One-time PIN](https://developers.cloudflare.com/cloudflare-one/identity/one-time-pin/) |
+| 5. Email forwarding | Email Routing, its records in the zone file, destination addresses, an Email Worker forwarding one address to everyone in a file | [Email Routing](https://developers.cloudflare.com/email-routing/) |
+
+**Site types.** `"type"` fills in what that kind of site needs; anything in `site-setup.json` overrides it:
+
+| Type | Example | Defaults |
+|---|---|---|
+| `private-archive` | family-tree | Cloudflare builds from GitHub; secrets `SITE_USER`, `SITE_PASSWORD` in production and preview; pages.dev redirect without subdomains (staging stays) |
+| `public-with-admin` | bavarianspringboks | built by GitHub Actions; secret `GITHUB_TOKEN`; pages.dev redirect with subdomains; admin login on `/admin` from `admins.txt`, IDs into `src/config.mjs` |
+
+Other keys: `project`, `host`, `zone_file` (required); `watch_paths`, `preview_branches`, `r2` (`{"BINDING": "bucket"}`),
+`access` (`name`, `path`, `admins_file`, `config_file`), `email_forward` (`address`, `forward_file`, `worker`).
+Tests (no network): `python3 -m unittest discover -s setup`.
 
 ## Planned
 
 1. **Access rules per path** – one middleware with three modes (`public`, shared `password`, `access`), so a
-   whole-site login like family-tree's uses the same code.
-2. **Setup script** – reads a site's settings and makes Cloudflare and GitHub match: Pages project, custom domain,
-   DNS records, the Access application (writing its IDs back into the settings), secrets.
-3. **GitHub App instead of a personal token** – nothing expires, and no token tied to one person's account.
-4. Shared GitHub workflows (daily rebuild, photo conversion).
+   whole-site login like family-tree's uses the same code. When the family edits.
+2. **GitHub App instead of a personal token** – nothing expires. When the club's repository moves to a club
+   organisation.
+3. Shared GitHub workflows (daily rebuild, photo conversion).
