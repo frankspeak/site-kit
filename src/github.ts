@@ -50,6 +50,12 @@ export class GitHub {
     return this.api(`/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(this.branch)}`, {}, 'application/vnd.github.raw+json');
   }
 
+  /** The branch's latest commits, newest first (GitHub's format: sha, html_url, commit.message, commit.author.date). */
+  async commits(page: number, perPage: number): Promise<CommitInfo[]> {
+    const res = await this.api(`/commits?sha=${encodeURIComponent(this.branch)}&per_page=${perPage}&page=${page}`);
+    return (await res.json()) as CommitInfo[];
+  }
+
   /** Upload a binary file (base64) as a blob; returns its sha for a later commit. */
   async blob(base64: string): Promise<string> {
     const res = await this.api('/git/blobs', { method: 'POST', body: JSON.stringify({ content: base64, encoding: 'base64' }) });
@@ -82,6 +88,12 @@ export class GitHub {
       }
     }
   }
+}
+
+export interface CommitInfo {
+  sha: string;
+  html_url: string;
+  commit: { message: string; author: { date: string } };
 }
 
 export interface Change {

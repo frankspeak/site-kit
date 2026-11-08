@@ -12,6 +12,10 @@ const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 's
 /** Generous: a commit is one tree request whatever its size. Pages that upload a lot split it themselves. */
 const MAX_CHANGES = 1000;
 const MAX_BLOB_BYTES = 8 * 1024 * 1024; // photos arrive resized – anything bigger is a mistake
+/** Commits read per history page – one GitHub call; small enough to read within the free plan's 10 ms CPU. */
+const HISTORY_PAGE = 50;
+/** The line `commit` adds to every message (the history finds the admin's saves by it). */
+const SAVED_BY = 'Saved in the website admin by ';
 
 type Handler = PagesFunction<Env>;
 
@@ -19,6 +23,7 @@ export function createAdmin(config: AdminConfig) {
   const base = (config.path ?? '/admin').replace(/\/$/, '');
   const api = `${base}/api/`;
   const readable = config.readable ?? config.writable;
+  const nameOf = (email: string) => config.names?.[email.toLowerCase()] ?? email;
 
   /**
    * Guards the admin pages (functions<path>/_middleware.ts). On any other host than `config.host` (one without
@@ -70,8 +75,27 @@ export function createAdmin(config: AdminConfig) {
     }
   };
 
-  /** GET – who is signed in. */
-  const whoami: Handler = async ({ data }) => json({ email: data.email });
+  /** GET – who is signed in: `{ email, name }` (name: from `config.names`, else the email). */
+  const whoami: Handler = async ({ data }) => json({ email: data.email, name: nameOf(String(data.email)) });
+
+  /**
+   * GET ?page=1 – the admin's saves among the branch's latest commits, newest first:
+   * `{ saves: [{ sha, date, summary, by, url }], more }`. `by` is the name from `config.names`, else the email;
+   * commits made outside the admin (code changes) are left out. `more`: an older page exists.
+   */
+  const history: Handler = async ({ request, env }) => {
+    const page = Math.min(Math.max(Number.parseInt(new URL(request.url).searchParams.get('page') ?? '1', 10) || 1, 1), 100);
+    const commits = await new GitHub(env, config).commits(page, HISTORY_PAGE);
+    const saves = commits.flatMap((c) => {
+      const at = c.commit.message.lastIndexOf(SAVED_BY);
+      if (at < 0) return [];
+      const email = c.commit.message.slice(at + SAVED_BY.length).trim().split(/\s/)[0];
+      return [{ sha: c.sha, date: c.commit.author.date, summary: c.commit.message.split('\n')[0], by: nameOf(email), url: c.html_url }];
+    });
+    return new Response(JSON.stringify({ saves, more: commits.length === HISTORY_PAGE }), {
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+    });
+  };
 
   /** GET – the repository's file list (passed through; the browser picks out what it needs). */
   const tree: Handler = async ({ env }) => {
@@ -104,9 +128,9 @@ export function createAdmin(config: AdminConfig) {
       if (!allowed(c.path, config.writable)) return json({ error: `Not allowed: ${c.path}` }, 400);
       if (!c.delete && !c.sha && typeof c.content !== 'string') return json({ error: `No content for ${c.path}` }, 400);
     }
-    const message = `${(body.message ?? 'Admin update').slice(0, 120)}\n\nSaved in the website admin by ${data.email}`;
+    const message = `${(body.message ?? 'Admin update').slice(0, 120)}\n\n${SAVED_BY}${data.email}`;
     return json({ commit: await new GitHub(env, config).commit(message, changes) });
   };
 
-  return { guard, apiGuard, whoami, tree, file, blob, commit };
+  return { guard, apiGuard, whoami, history, tree, file, blob, commit };
 }

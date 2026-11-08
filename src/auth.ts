@@ -29,6 +29,21 @@ export interface AdminConfig {
   path?: string;
   /** Appended to the "admin isn't set up yet" message, e.g. where the site's README explains the settings. */
   setupHelp?: string;
+  /** Administrators' names by email (lowercase), shown instead of the address – e.g. `namesFromList(admins.txt)`. */
+  names?: Record<string, string>;
+}
+
+/**
+ * Names from an admins list – one email address per line, the name as a comment after it
+ * (`hardy@example.com  # Hardy`), the format the setup script reads. Lines without a name are left out.
+ */
+export function namesFromList(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*([^#\s]+@[^#\s]+)\s*#\s*(.+?)\s*$/);
+    if (m) out[m[1].toLowerCase()] = m[2];
+  }
+  return out;
 }
 
 export interface Env {

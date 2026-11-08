@@ -24,6 +24,7 @@ const blobs = new Map(); // sha -> Buffer
 const trees = new Map(); // tree sha -> entries
 let head = 'c0';
 let commitNo = 0;
+const history = []; // commits made through the mock, newest first (GET /commits)
 
 const sha = (buf) => crypto.createHash('sha1').update(buf).digest('hex');
 function walk(dir, out = []) {
@@ -65,6 +66,10 @@ http.createServer(async (req, res) => {
       const s = sha(buf); blobs.set(s, buf);
       return send(res, 201, { sha: s });
     }
+    if (req.method === 'GET' && p === '/commits') {
+      const per = Number(url.searchParams.get('per_page') || 30), page = Number(url.searchParams.get('page') || 1);
+      return send(res, 200, history.slice((page - 1) * per, page * per));
+    }
     if (req.method === 'GET' && p.startsWith('/git/ref/heads/')) return send(res, 200, { object: { sha: head } });
     if (req.method === 'GET' && p.startsWith('/git/commits/')) return send(res, 200, { sha: p.split('/').pop(), tree: { sha: `tree-${head}` } });
     if (req.method === 'POST' && p === '/git/trees') {
@@ -95,6 +100,7 @@ http.createServer(async (req, res) => {
       fs.mkdirSync(OUT, { recursive: true });
       fs.appendFileSync(path.join(OUT, 'commits.log'), log.join('\n') + '\n');
       console.log(log.join('\n'));
+      history.unshift({ sha: id, html_url: `https://github.com/mock/commit/${id}`, commit: { message, author: { date: new Date().toISOString() } } });
       head = id;
       return send(res, 200, { object: { sha: id } });
     }

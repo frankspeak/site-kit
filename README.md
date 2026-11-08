@@ -44,7 +44,8 @@ What a save does, step by step:
    the changes applied, create a commit on top, move the branch to it. If someone else committed in between, it
    tries once more, then reports an error so the administrator can save again.
 5. **The commit** is recorded under the account that owns the token; its message is the summary plus
-   "Saved in the website admin by <email>", so the history shows who saved what. Undoing a save is reverting
+   "Saved in the website admin by <email>", so the history shows who saved what – also in the admin itself
+   (`GET history`, with names instead of addresses if the site passes `names`). Undoing a save is reverting
    that commit.
 6. **The build:** a new commit on the branch starts the site's build – by a GitHub Actions workflow that uploads to
    Pages (bavarianspringboks), or by Cloudflare itself for a project connected to the repository. A save in the admin
@@ -77,6 +78,8 @@ export const admin = createAdmin({
   githubBranch: 'main',
   writable: { 'src/content/events/': /^[^/]+\.md$/ },   // folder → pattern for the rest of the path
   // readable: defaults to `writable`;  path: defaults to '/admin'
+  // names: { 'ann@example.com': 'Ann' } – shown instead of addresses; namesFromList() reads them from an admins
+  //   list with the name as a comment (`ann@example.com  # Ann`)
 });
 ```
 
@@ -87,6 +90,7 @@ Pages Functions are routed by file name, so each route is a one-line file:
 | `functions/admin/_middleware.ts` | `export const onRequest = admin.guard;` |
 | `functions/admin/api/_middleware.ts` | `export const onRequest = admin.apiGuard;` |
 | `functions/admin/api/whoami.ts` | `export const onRequestGet = admin.whoami;` |
+| `functions/admin/api/history.ts` | `export const onRequestGet = admin.history;` |
 | `functions/admin/api/tree.ts` | `export const onRequestGet = admin.tree;` |
 | `functions/admin/api/file.ts` | `export const onRequestGet = admin.file;` |
 | `functions/admin/api/blob.ts` | `export const onRequestPost = admin.blob;` |
@@ -96,7 +100,8 @@ The API the site's admin pages then call (all under `/admin/api/`):
 
 | Call | Does |
 |---|---|
-| `GET whoami` | `{ email }` of the signed-in administrator |
+| `GET whoami` | `{ email, name }` of the signed-in administrator |
+| `GET history?page=1` | the admin's saves among the latest 50 commits: `{ saves: [{ sha, date, summary, by, url }], more }` |
 | `GET tree` | the repository's file list (GitHub's format) |
 | `GET file?path=…` | raw contents of a readable file |
 | `POST blob` `{ content: base64 }` | uploads one binary file, returns `{ sha }` for the next commit |
@@ -129,7 +134,7 @@ The working copy is never changed; every "commit" is listed in `.mock-github/com
 src/index.ts             what the package exports
 src/auth.ts              checks the Cloudflare Access login (signature, audience, expiry); the settings type
 src/github.ts            GitHub client: file list, file contents, upload, one commit with several changes
-src/admin.ts             createAdmin(): the guards and the five API handlers
+src/admin.ts             createAdmin(): the guards and the six API handlers
 bin/mock-github.mjs      the stand-in GitHub for local testing
 setup/site_setup.py      the setup script (Python, not in the npm package)
 setup/test_site_setup.py its tests
@@ -139,7 +144,7 @@ setup/test_site_setup.py its tests
 
 ## Releases
 
-Sites pin a release (`v0.1.0`), so a change here reaches a site only when that site moves to a newer tag.
+Sites pin a release (`v0.2.0`), so a change here reaches a site only when that site moves to a newer tag.
 After a change: `npm run check`, test in a site with `npm install ../site-kit`, then tag and push
 (`git tag v0.x.0 && git push --tags`).
 
