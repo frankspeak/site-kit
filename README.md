@@ -102,7 +102,7 @@ The API the site's admin pages then call (all under `/admin/api/`):
 | Call | Does |
 |---|---|
 | `GET whoami` | `{ email, name }` of the signed-in administrator |
-| `GET history?before=…&all=1` | changes to the content folders (the writable prefixes cut to two levels), newest first, about 100 a page: `{ changes: [{ sha, date, summary, by, via, url }], next }`; `via`: `admin`, `code` or `automatic`; `all=1`: every commit; `next` → `before` for older ones |
+| `GET history?before=…&all=1&folder=…` | changes to the content folders (the writable prefixes cut to two levels), newest first, about 100 a page: `{ changes: [{ sha, date, summary, by, via, url }], next }`; `via`: `admin`, `code` or `automatic`; `all=1`: every commit; `folder`: one writable folder (or one holding them); `next` → `before` for older ones |
 | `GET tree` | the repository's file list (GitHub's format) |
 | `GET file?path=…` | raw contents of a readable file |
 | `POST blob` `{ content: base64 }` | uploads one binary file, returns `{ sha }` for the next commit |
@@ -145,7 +145,7 @@ setup/test_site_setup.py its tests
 
 ## Releases
 
-Sites pin a release (`v0.3.0`), so a change here reaches a site only when that site moves to a newer tag.
+Sites pin a release (`v0.4.0`), so a change here reaches a site only when that site moves to a newer tag.
 After a change: `npm run check`, test in a site with `npm install ../site-kit`, then tag and push
 (`git tag v0.x.0 && git push --tags`).
 

@@ -29,6 +29,11 @@ export function createAdmin(config: AdminConfig) {
   // The content folders the history follows: the writable prefixes cut to two levels (src/content/events/ → src/content).
   const historyFolders = [...new Set(Object.keys(config.writable).map((p) => p.split('/').filter(Boolean).slice(0, 2).join('/')))]
     .filter(Boolean).slice(0, MAX_HISTORY_FOLDERS);
+  /** A folder the history may be narrowed to: a writable folder or one that holds them, two levels deep or more. */
+  const historyFolder = (f: string) => {
+    const path = f.replace(/^\/+|\/+$/g, '');
+    return path.split('/').length >= 2 && !path.includes('..') && Object.keys(config.writable).some((w) => `${w.replace(/\/+$/, '')}/`.startsWith(`${path}/`)) ? path : null;
+  };
 
   /**
    * Guards the admin pages (functions<path>/_middleware.ts). On any other host than `config.host` (one without
@@ -84,12 +89,13 @@ export function createAdmin(config: AdminConfig) {
   const whoami: Handler = async ({ data }) => json({ email: data.email, name: nameOf(String(data.email)) });
 
   /**
-   * GET ?before=<ISO time>&all=1 – changes to the site's content, newest first:
+   * GET ?before=<ISO time>&all=1&folder=… – changes to the site's content, newest first:
    * `{ changes: [{ sha, date, summary, by, via, url }], next }`.
    * `via`: 'admin' (saved in the admin; `by` is the name from `config.names`, else the email), 'code' (a commit made
    * elsewhere; `by` from the author's email via `config.names`, else the author's name) or 'automatic' (a bot).
    * Content = commits touching the writable folders (one GitHub call per folder, 100 commits each, merged); `all=1`:
-   * every commit on the branch. `next`: pass as `before` for older changes (the first may repeat – drop it by sha);
+   * every commit on the branch; `folder`: only that writable folder (or one holding writable folders, e.g.
+   * `src/content/events`, `public/images`). `next`: pass as `before` for older changes (the first may repeat – drop it by sha);
    * null when there are none.
    */
   const history: Handler = async ({ request, env }) => {
@@ -97,7 +103,9 @@ export function createAdmin(config: AdminConfig) {
     const before = params.get('before') ?? '';
     const until = before && !Number.isNaN(Date.parse(before)) ? new Date(before).toISOString() : undefined;
     const gh = new GitHub(env, config);
-    const paths = params.get('all') === '1' ? [undefined] : historyFolders;
+    const folder = params.get('folder');
+    if (folder && !historyFolder(folder)) return json({ error: 'Folder not allowed' }, 400);
+    const paths = folder ? [historyFolder(folder)!] : params.get('all') === '1' ? [undefined] : historyFolders;
     const lists = await Promise.all(paths.map((path) => gh.commits(HISTORY_PAGE, { path, until })));
     // A full list may go on beyond its oldest commit: everything older than the newest such cut-off waits for `next`.
     const cut = lists.filter((l) => l.length === HISTORY_PAGE).map((l) => l[l.length - 1].commit.committer.date).sort().pop() ?? null;

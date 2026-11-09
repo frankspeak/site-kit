@@ -1,6 +1,6 @@
 {
   "name": "site-kit",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Shared plumbing for small static websites on Cloudflare Pages: a Cloudflare Access login and an admin API that saves to GitHub.",
   "type": "module",
   "repository": "github:frankspeak/site-kit",
