@@ -45,7 +45,8 @@ What a save does, step by step:
    tries once more, then reports an error so the administrator can save again.
 5. **The commit** is recorded under the account that owns the token; its message is the summary plus
    "Saved in the website admin by <email>", so the history shows who saved what – also in the admin itself
-   (`GET history`, with names instead of addresses if the site passes `names`). Undoing a save is reverting
+   (`GET history`: every change to the content, in the admin or not, with names instead of addresses if the site
+   passes `names`). Undoing a save is reverting
    that commit.
 6. **The build:** a new commit on the branch starts the site's build – by a GitHub Actions workflow that uploads to
    Pages (bavarianspringboks), or by Cloudflare itself for a project connected to the repository. A save in the admin
@@ -101,7 +102,7 @@ The API the site's admin pages then call (all under `/admin/api/`):
 | Call | Does |
 |---|---|
 | `GET whoami` | `{ email, name }` of the signed-in administrator |
-| `GET history?page=1` | the admin's saves among the latest 50 commits: `{ saves: [{ sha, date, summary, by, url }], more }` |
+| `GET history?before=…&all=1` | changes to the content folders (the writable prefixes cut to two levels), newest first, about 100 a page: `{ changes: [{ sha, date, summary, by, via, url }], next }`; `via`: `admin`, `code` or `automatic`; `all=1`: every commit; `next` → `before` for older ones |
 | `GET tree` | the repository's file list (GitHub's format) |
 | `GET file?path=…` | raw contents of a readable file |
 | `POST blob` `{ content: base64 }` | uploads one binary file, returns `{ sha }` for the next commit |
@@ -144,7 +145,7 @@ setup/test_site_setup.py its tests
 
 ## Releases
 
-Sites pin a release (`v0.2.0`), so a change here reaches a site only when that site moves to a newer tag.
+Sites pin a release (`v0.3.0`), so a change here reaches a site only when that site moves to a newer tag.
 After a change: `npm run check`, test in a site with `npm install ../site-kit`, then tag and push
 (`git tag v0.x.0 && git push --tags`).
 

@@ -50,9 +50,15 @@ export class GitHub {
     return this.api(`/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(this.branch)}`, {}, 'application/vnd.github.raw+json');
   }
 
-  /** The branch's latest commits, newest first (GitHub's format: sha, html_url, commit.message, commit.author.date). */
-  async commits(page: number, perPage: number): Promise<CommitInfo[]> {
-    const res = await this.api(`/commits?sha=${encodeURIComponent(this.branch)}&per_page=${perPage}&page=${page}`);
+  /**
+   * The branch's commits, newest first (GitHub's format): only those that touch `path` (a file or folder) if given,
+   * only those up to `until` (ISO time, inclusive) if given.
+   */
+  async commits(perPage: number, opts: { path?: string; until?: string } = {}): Promise<CommitInfo[]> {
+    const q = new URLSearchParams({ sha: this.branch, per_page: String(perPage) });
+    if (opts.path) q.set('path', opts.path);
+    if (opts.until) q.set('until', opts.until);
+    const res = await this.api(`/commits?${q}`);
     return (await res.json()) as CommitInfo[];
   }
 
@@ -93,7 +99,7 @@ export class GitHub {
 export interface CommitInfo {
   sha: string;
   html_url: string;
-  commit: { message: string; author: { date: string } };
+  commit: { message: string; author: { name: string; email: string; date: string }; committer: { date: string } };
 }
 
 export interface Change {

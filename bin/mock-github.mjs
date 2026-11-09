@@ -67,8 +67,11 @@ http.createServer(async (req, res) => {
       return send(res, 201, { sha: s });
     }
     if (req.method === 'GET' && p === '/commits') {
-      const per = Number(url.searchParams.get('per_page') || 30), page = Number(url.searchParams.get('page') || 1);
-      return send(res, 200, history.slice((page - 1) * per, page * per));
+      const q = url.searchParams, per = Number(q.get('per_page') || 30), page = Number(q.get('page') || 1);
+      const at = q.get('path'), until = q.get('until');
+      const hits = history.filter((c) => (!at || c.paths.some((f) => f === at || f.startsWith(`${at.replace(/\/$/, '')}/`)))
+        && (!until || c.commit.committer.date <= until));
+      return send(res, 200, hits.slice((page - 1) * per, page * per).map(({ paths, ...c }) => c));
     }
     if (req.method === 'GET' && p.startsWith('/git/ref/heads/')) return send(res, 200, { object: { sha: head } });
     if (req.method === 'GET' && p.startsWith('/git/commits/')) return send(res, 200, { sha: p.split('/').pop(), tree: { sha: `tree-${head}` } });
@@ -100,7 +103,9 @@ http.createServer(async (req, res) => {
       fs.mkdirSync(OUT, { recursive: true });
       fs.appendFileSync(path.join(OUT, 'commits.log'), log.join('\n') + '\n');
       console.log(log.join('\n'));
-      history.unshift({ sha: id, html_url: `https://github.com/mock/commit/${id}`, commit: { message, author: { date: new Date().toISOString() } } });
+      const now = new Date().toISOString();
+      history.unshift({ sha: id, html_url: `https://github.com/mock/commit/${id}`, paths: entries.map((e) => e.path),
+        commit: { message, author: { name: 'mock', email: 'mock@example.com', date: now }, committer: { date: now } } });
       head = id;
       return send(res, 200, { object: { sha: id } });
     }

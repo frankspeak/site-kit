@@ -12,8 +12,10 @@ const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 's
 /** Generous: a commit is one tree request whatever its size. Pages that upload a lot split it themselves. */
 const MAX_CHANGES = 1000;
 const MAX_BLOB_BYTES = 8 * 1024 * 1024; // photos arrive resized – anything bigger is a mistake
-/** Commits read per history page – one GitHub call; small enough to read within the free plan's 10 ms CPU. */
-const HISTORY_PAGE = 50;
+/** Commits read per folder per history page (GitHub's maximum); a few such lists parse well within the free plan's 10 ms CPU. */
+const HISTORY_PAGE = 100;
+/** At most this many content folders are read for the history (one GitHub call each). */
+const MAX_HISTORY_FOLDERS = 4;
 /** The line `commit` adds to every message (the history finds the admin's saves by it). */
 const SAVED_BY = 'Saved in the website admin by ';
 
@@ -24,6 +26,9 @@ export function createAdmin(config: AdminConfig) {
   const api = `${base}/api/`;
   const readable = config.readable ?? config.writable;
   const nameOf = (email: string) => config.names?.[email.toLowerCase()] ?? email;
+  // The content folders the history follows: the writable prefixes cut to two levels (src/content/events/ → src/content).
+  const historyFolders = [...new Set(Object.keys(config.writable).map((p) => p.split('/').filter(Boolean).slice(0, 2).join('/')))]
+    .filter(Boolean).slice(0, MAX_HISTORY_FOLDERS);
 
   /**
    * Guards the admin pages (functions<path>/_middleware.ts). On any other host than `config.host` (one without
@@ -79,20 +84,38 @@ export function createAdmin(config: AdminConfig) {
   const whoami: Handler = async ({ data }) => json({ email: data.email, name: nameOf(String(data.email)) });
 
   /**
-   * GET ?page=1 – the admin's saves among the branch's latest commits, newest first:
-   * `{ saves: [{ sha, date, summary, by, url }], more }`. `by` is the name from `config.names`, else the email;
-   * commits made outside the admin (code changes) are left out. `more`: an older page exists.
+   * GET ?before=<ISO time>&all=1 – changes to the site's content, newest first:
+   * `{ changes: [{ sha, date, summary, by, via, url }], next }`.
+   * `via`: 'admin' (saved in the admin; `by` is the name from `config.names`, else the email), 'code' (a commit made
+   * elsewhere; `by` from the author's email via `config.names`, else the author's name) or 'automatic' (a bot).
+   * Content = commits touching the writable folders (one GitHub call per folder, 100 commits each, merged); `all=1`:
+   * every commit on the branch. `next`: pass as `before` for older changes (the first may repeat – drop it by sha);
+   * null when there are none.
    */
   const history: Handler = async ({ request, env }) => {
-    const page = Math.min(Math.max(Number.parseInt(new URL(request.url).searchParams.get('page') ?? '1', 10) || 1, 1), 100);
-    const commits = await new GitHub(env, config).commits(page, HISTORY_PAGE);
-    const saves = commits.flatMap((c) => {
-      const at = c.commit.message.lastIndexOf(SAVED_BY);
-      if (at < 0) return [];
-      const email = c.commit.message.slice(at + SAVED_BY.length).trim().split(/\s/)[0];
-      return [{ sha: c.sha, date: c.commit.author.date, summary: c.commit.message.split('\n')[0], by: nameOf(email), url: c.html_url }];
-    });
-    return new Response(JSON.stringify({ saves, more: commits.length === HISTORY_PAGE }), {
+    const params = new URL(request.url).searchParams;
+    const before = params.get('before') ?? '';
+    const until = before && !Number.isNaN(Date.parse(before)) ? new Date(before).toISOString() : undefined;
+    const gh = new GitHub(env, config);
+    const paths = params.get('all') === '1' ? [undefined] : historyFolders;
+    const lists = await Promise.all(paths.map((path) => gh.commits(HISTORY_PAGE, { path, until })));
+    // A full list may go on beyond its oldest commit: everything older than the newest such cut-off waits for `next`.
+    const cut = lists.filter((l) => l.length === HISTORY_PAGE).map((l) => l[l.length - 1].commit.committer.date).sort().pop() ?? null;
+    const seen = new Set<string>();
+    const changes = lists.flat()
+      .filter((c) => (!cut || c.commit.committer.date >= cut) && !seen.has(c.sha) && seen.add(c.sha))
+      .sort((x, y) => (x.commit.committer.date < y.commit.committer.date ? 1 : -1))
+      .map((c) => {
+        const msg = c.commit.message;
+        const at = msg.lastIndexOf(SAVED_BY);
+        const a = c.commit.author;
+        const [by, via] = at >= 0
+          ? [nameOf(msg.slice(at + SAVED_BY.length).trim().split(/\s/)[0]), 'admin']
+          : /\[bot\]$/.test(a.name) ? ['Automatic', 'automatic']
+          : [config.names?.[a.email.toLowerCase()] ?? a.name, 'code'];
+        return { sha: c.sha, date: c.commit.author.date, summary: msg.split('\n')[0], by, via, url: c.html_url };
+      });
+    return new Response(JSON.stringify({ changes, next: cut }), {
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
   };
